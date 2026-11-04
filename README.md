@@ -35,7 +35,7 @@ requests, so `git log` shows the project being built one step at a time.
 | Model versioning | `dim_customers` v1 (legacy, deprecated and disabled) and v2 (current); `audit_helper` compares the two |
 | Incremental models | `fct_orders` uses `merge` on `order_id` with a reusable lookback-window macro |
 | Python models | `is_holiday.py` flags US federal holidays with pandas on Databricks serverless compute |
-| SQL UDFs | `safe_divide` and `is_positive_int` are defined as dbt `functions` and deployed to the warehouse |
+| SQL UDFs | `safe_divide` is defined as a dbt `function`, deployed to the warehouse, and called from `dim_customers` |
 | Dynamic SQL | `int_orders_pivoted` queries the distinct order statuses at compile time and pivots them into columns |
 | Custom generic tests | `greater_than_zero`, plus an override of the built-in `not_null` that also catches sentinel values by data type |
 | Unit tests | Inline dict and CSV-fixture unit tests, including mocking `current_timestamp()` so date math is deterministic |
@@ -72,7 +72,7 @@ data is the set of CSVs in [`data/`](data/).
 |---|---|
 | `stg_jaffle_shop__customers` | Renames `id` → `customer_id` and builds a title-cased `customer_name` |
 | `stg_jaffle_shop__orders` | Renames columns and normalizes status: anything containing `return` (e.g. `return_pending`) becomes `returned`, and anything else containing `pending` becomes `placed`. Keeps the original as `order_status_raw` and computes `days_since_last_order` (days from `order_date` to now) |
-| `stg_stripe__payments` | Renames columns and converts `amount` from cents to dollars |
+| `stg_stripe__payments` | Renames columns and converts `amount` from cents to dollars with the `cents_to_dollars` macro |
 
 ### Intermediate: reusable building blocks
 
@@ -149,8 +149,10 @@ changing only the catalog name.
 
 **Dev builds are capped by date.** The [`date_window`](macros/date_window.sql) macro, used in
 `fct_orders`, `dim_customers`, and `int_orders_pivoted`, handles this:
-- **When `target.name == 'dev'`:** filters to the last `lookback_days` days (default 3500). You
-  can change this with `--vars '{"lookback_days": 30}'`. CI also uses the `dev` target, so the same
+- **When `target.name == 'dev'`:** filters to the `lookback_days` days (default 3500) before
+  `date_window_anchor`. You can change either with `--vars`, e.g. `--vars '{"lookback_days": 30}'`.
+  The anchor defaults to `current_date()`, but `dbt_project.yml` sets it to `2018-04-09`, the last
+  date in the static sample data, so dev builds keep returning rows as time passes. CI also uses the `dev` target, so the same
   filter applies there.
 - **Incremental runs on other targets:** uses the same number of days as a lookback from
   `max(column)` in the existing table, to pick up late-arriving rows.
@@ -189,7 +191,7 @@ Production runs are not defined in this repo. The project only needs a target wh
 | Macro | Purpose |
 |---|---|
 | `date_window(column, lookback_days, default_date)` | Date filter that depends on the environment and run type (see above) |
-| `cents_to_dollars(column, decimal=2)` | Rounded cents → dollars conversion |
+| `cents_to_dollars(column, decimal=2)` | Rounded cents → dollars conversion (used in `stg_stripe__payments`) |
 | `union_table_by_prefix(database, schema, prefix, columns)` | `UNION ALL` of every table in a schema that matches a prefix (uses `dbt_utils.get_relations_by_prefix`) |
 | `find_orphaned_tables(database, schemas)` | Compares `information_schema` with the dbt manifest and **logs** `DROP` statements for warehouse objects that no model, seed, or snapshot defines. It never runs the drops. It also accounts for the unversioned pointer view that Fusion creates for the latest model version |
 | `find_datatypes(relation)` | Renders a relation's live columns as YAML `- name / data_type` entries, ready to paste into a schema file. It returns text instead of logging it, so call it from an analysis and run `dbt compile` |
@@ -224,7 +226,7 @@ test yet.
 │   ├── marts/                          # fct_orders, dim_customers v1/v2
 │   └── docs.md                         # shared doc blocks
 ├── macros/                             # env naming, date_window, audit/introspection helpers
-├── functions/                          # SQL UDFs (safe_divide, is_positive_int)
+├── functions/                          # SQL UDF (safe_divide)
 ├── tests/
 │   ├── generic/                        # greater_than_zero, not_null override
 │   ├── singular/                       # one-off assertions
