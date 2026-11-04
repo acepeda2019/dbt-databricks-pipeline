@@ -5,6 +5,11 @@ name: dbt publish manifest
 on:
   push:
     branches: [main]
+  # The artifact expires after retention-days (30). Republish weekly so PR CI always has a
+  # baseline, even when main goes quiet; otherwise slim CI falls back to building everything.
+  schedule:
+    - cron: '0 6 * * 1'   # Mondays 06:00 UTC
+  workflow_dispatch:
 
 jobs:
   publish-manifest:
