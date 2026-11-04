@@ -50,47 +50,12 @@ one step at a time.
 
 ## Architecture and lineage
 
-```mermaid
-flowchart LR
-    subgraph raw["raw catalog (sources)"]
-        rc[(jaffle_shop.customers)]
-        ro[(jaffle_shop.orders)]
-        rp[(stripe.payments)]
-    end
+![dbt docs lineage for dim_customers, colored by model layer](docs/images/lineage.png)
 
-    subgraph stg["staging (views)"]
-        sc[stg_jaffle_shop__customers]
-        so[stg_jaffle_shop__orders]
-        sp[stg_stripe__payments]
-    end
-
-    subgraph int["intermediate (tables)"]
-        ds[date_spine]
-        ih[is_holiday 🐍]
-        iop[int_orders_pivoted]
-    end
-
-    subgraph mrt["marts (tables)"]
-        fo[fct_orders<br/>incremental · contract]
-        dc[dim_customers v2<br/>contract]
-    end
-
-    emp[/employees seed/]
-    snap[[orders_snapshot]]
-
-    rc --> sc
-    ro --> so
-    rp --> sp
-    ro --> snap
-    so --> iop
-    sp --> iop
-    so --> fo
-    sp --> fo
-    ds --> ih
-    sc --> dc
-    fo --> dc
-    emp --> dc
-```
+*Upstream lineage of `dim_customers` from `dbt docs`, with the model-layer lens on: three sources →
+staging models → `fct_orders`, plus the `employees` seed and the `safe_divide` UDF. Not shown:
+`int_orders_pivoted` (reads the same staging models), the `date_spine` → `is_holiday` calendar
+branch, and `orders_snapshot`.*
 
 **Sources** live in a separate `raw` catalog (`raw.jaffle_shop.*`, `raw.stripe.*`). The source
 data is the set of CSVs in [`data/`](data/).
