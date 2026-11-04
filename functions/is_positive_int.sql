@@ -1,1 +1,0 @@
-REGEXP_INSTR(a_string, '^[0-9]+$')

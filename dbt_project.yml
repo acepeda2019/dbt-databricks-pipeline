@@ -30,6 +30,12 @@ clean-targets:                            # Specify a custom list of directories
 
 require-dbt-version: ">=1.0.0"            # Restricts project to only work with range of dbt versions (package control)
 
+vars:
+  # The sample data is static and ends 2018-04-09, so the dev date_window counts back from the end of
+  # the data instead of today; otherwise dev builds would eventually filter out every row.
+  # On live data, remove this to fall back to current_date().
+  date_window_anchor: "cast('2018-04-09' as date)"
+
 models:
   jaffle_shop:
     +database: analytics

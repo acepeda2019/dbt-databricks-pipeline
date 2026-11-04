@@ -51,4 +51,5 @@ final as (
 )
 
 select * from final
-where {{ date_window('most_recent_order_date') }}
+where 1=1
+    and {{ date_window('most_recent_order_date') }}

@@ -1,15 +1,4 @@
 functions:
-  - name: is_positive_int
-    description: My UDF that returns 1 if a string represents a naked positive integer (eg "10", "+8" is not allowed)
-    config:
-      volatility: deterministic
-    arguments:
-      - name: a_string
-        data_type: string
-        description: the string that I want to check
-    returns:
-      data_type: integer
-
   - name: safe_divide
     description: My UDF that safely divides two numbers, returning null if the denominator is zero
     arguments:
