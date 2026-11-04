@@ -38,5 +38,6 @@ pivoted as (
 
 select *
 from pivoted
-where {{ date_window('order_date') }}
+where 1=1
+    and {{ date_window('order_date') }}
 
