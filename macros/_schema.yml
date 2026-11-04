@@ -56,7 +56,8 @@ macros:
     description: >
       Returns a boolean date-filter predicate (no leading `and`) for a WHERE clause, chosen based
       on how the model is being built. In `dev`, always filters to the last `lookback_days` from
-      current_date, regardless of incremental state - this caps dev build volume/cost and never
+      the `date_window_anchor` var (a SQL date expression, default `current_date()`), regardless
+      of incremental state - this caps dev build volume/cost and never
       references `{{ this }}`, so it's safe on a full-refresh/first build. Outside `dev`, only
       filters when `is_incremental()` is true, using `max(column_name) from {{ this }}` as the
       anchor - this is the classic incremental-merge lookback window for catching late-arriving

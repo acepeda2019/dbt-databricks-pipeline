@@ -8,7 +8,7 @@ transform as (
         orderid as order_id,
         paymentmethod as payment_method,
         status as payment_status,
-        amount / 100 as amount
+        cast({{ cents_to_dollars('amount') }} as double) as amount
     from base
 )
 

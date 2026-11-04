@@ -12,7 +12,7 @@ models:
           - not_null
 
   - name: int_orders_pivoted
-    description: Orders pivoted so that each order date has one column per order status, containing the total amount of successful payments associated with orders in that status.
+    description: Orders pivoted so that each order date has one column per cleaned order status (`completed`, `placed`, `returned`, `shipped` - see `stg_jaffle_shop__orders`), containing the total amount of successful payments associated with orders in that status.
     columns:
       - name: order_date
         data_type: date
@@ -28,10 +28,6 @@ models:
       - name: placed
         data_type: double
         description: Total amount of successful payments for orders placed on this date that are in `placed` status.
-
-      - name: return_pending
-        data_type: double
-        description: Total amount of successful payments for orders placed on this date that are in `return_pending` status.
 
       - name: returned
         data_type: double
