@@ -6,8 +6,8 @@ focus is on the engineering around it: layered modeling, contracts, versioned mo
 loads, custom tests, unit tests, a Python model, SQL UDFs, environment isolation, and slim CI on
 GitHub Actions.
 
-Each feature was added through its own pull request, so `git log` shows the project being built
-one step at a time.
+The work was done in small Conventional Commits, mostly on feature branches merged through pull
+requests, so `git log` shows the project being built one step at a time.
 
 ---
 
@@ -52,8 +52,10 @@ one step at a time.
 
 ![dbt docs lineage for dim_customers, colored by model layer](docs/images/lineage.png)
 
-*Upstream lineage of `dim_customers` from `dbt docs`, with the model-layer lens on: three sources →
-staging models → `fct_orders`, plus the `employees` seed and the `safe_divide` UDF. Not shown:
+*Upstream lineage of `dim_customers` from `dbt docs`, with the model-layer lens on. The three
+sources feed the staging models. Orders and payments combine into `fct_orders`, which feeds
+`dim_customers` along with `stg_jaffle_shop__customers`, the `employees` seed, and the
+`safe_divide` UDF. Not shown:
 `int_orders_pivoted` (reads the same staging models), the `date_spine` → `is_holiday` calendar
 branch, and `orders_snapshot`.*
 
@@ -69,7 +71,7 @@ data is the set of CSVs in [`data/`](data/).
 | Model | What it does |
 |---|---|
 | `stg_jaffle_shop__customers` | Renames `id` → `customer_id` and builds a title-cased `customer_name` |
-| `stg_jaffle_shop__orders` | Renames columns, maps `return_pending` → `returned` and `pending` → `placed` (keeping `order_status_raw`), and computes `days_since_last_order` |
+| `stg_jaffle_shop__orders` | Renames columns and normalizes status: anything containing `return` (e.g. `return_pending`) becomes `returned`, and anything else containing `pending` becomes `placed`. Keeps the original as `order_status_raw` and computes `days_since_last_order` (days from `order_date` to now) |
 | `stg_stripe__payments` | Renames columns and converts `amount` from cents to dollars |
 
 ### Intermediate: reusable building blocks
@@ -120,7 +122,8 @@ Tests are layered from the raw sources up to the marts:
 Two project-level settings in `dbt_project.yml` apply to all of these:
 - **Failing rows are stored** (`data_tests: +store_failures: true`), so you can query a failed
   test's rows in the warehouse.
-- **Unit tests are skipped in prod** (`+enabled: "{{ var('dbt_env', 'dev') != 'prod' }}"`).
+- **Unit tests can be switched off for production runs** by passing `--vars '{dbt_env: prod}'`
+  (`+enabled: "{{ var('dbt_env', 'dev') != 'prod' }}"`). This uses a variable, not the target name.
 
 ---
 
@@ -141,15 +144,17 @@ Two macros implement this:
   (`staging`, `intermediate`, `marts`, `seeds`, `snapshots`, `functions`) with no environment
   prefix.
 
-This keeps dev data fully separate from prod, and SQL you copy out of dev runs unchanged against
-prod once you switch the catalog.
+This keeps dev data fully separate from prod. A query written against dev works against prod by
+changing only the catalog name.
 
-**Dev builds are capped by date.** The [`date_window`](macros/date_window.sql) macro handles this:
+**Dev builds are capped by date.** The [`date_window`](macros/date_window.sql) macro, used in
+`fct_orders`, `dim_customers`, and `int_orders_pivoted`, handles this:
 - **When `target.name == 'dev'`:** filters to the last `lookback_days` days (default 3500). You
-  can change this with `--vars '{"lookback_days": 30}'`.
+  can change this with `--vars '{"lookback_days": 30}'`. CI also uses the `dev` target, so the same
+  filter applies there.
 - **Incremental runs on other targets:** uses the same number of days as a lookback from
   `max(column)` in the existing table, to pick up late-arriving rows.
-- **Full refreshes on other targets:** applies no filter.
+- **Everything else** (full refreshes and non-incremental models on other targets): no filter.
 
 ---
 
@@ -157,7 +162,8 @@ prod once you switch the catalog.
 
 Two GitHub Actions workflows in [`.github/workflows/`](.github/workflows/) implement slim CI.
 Both install dbt Fusion and connect to Databricks using
-[`ci/profiles.yml`](ci/profiles.yml), which reads everything from repository secrets.
+[`ci/profiles.yml`](ci/profiles.yml), which reads the host, HTTP path, and token from repository
+secrets.
 
 **`dbt-publish-manifest.yml`** runs on push to `main`:
 1. Runs `dbt deps` and `dbt source freshness`. Freshness is non-blocking.
@@ -186,10 +192,10 @@ Production runs are not defined in this repo. The project only needs a target wh
 | `cents_to_dollars(column, decimal=2)` | Rounded cents → dollars conversion |
 | `union_table_by_prefix(database, schema, prefix, columns)` | `UNION ALL` of every table in a schema that matches a prefix (uses `dbt_utils.get_relations_by_prefix`) |
 | `find_orphaned_tables(database, schemas)` | Compares `information_schema` with the dbt manifest and **logs** `DROP` statements for warehouse objects that no model, seed, or snapshot defines. It never runs the drops. It also accounts for the unversioned pointer view that Fusion creates for the latest model version |
-| `find_datatypes(relation)` | Prints a relation's live columns as YAML `- name / data_type` entries, ready to paste into a schema file |
-| `find_all_datatypes()` | Prints live column types for every model, seed, and snapshot in the current target. Useful for spotting undocumented columns |
+| `find_datatypes(relation)` | Renders a relation's live columns as YAML `- name / data_type` entries, ready to paste into a schema file. It returns text instead of logging it, so call it from an analysis and run `dbt compile` |
+| `find_all_datatypes()` | Logs live column types for every model, seed, and snapshot in the current target. Useful for spotting undocumented columns |
 
-Run the audit helpers with `dbt run-operation`, for example:
+Run the logging helpers with `dbt run-operation`, for example:
 
 ```bash
 dbt run-operation find_orphaned_tables --args '{database: analytics}'
@@ -202,8 +208,9 @@ models with `{{ function('safe_divide') }}(...)`.
 **Analyses** ([`analysis/`](analysis/)) hold scratch work: `codegen` commands for generating
 model YAML, and an `audit_helper` comparison of `dim_customers` v1 and v2.
 
-**Packages:** `dbt_utils`, `codegen`, `audit_helper`, `dbt_expectations` (which pulls in
-`dbt_date`), and `dbt_meta_testing`.
+**Packages:** `dbt_utils`, `codegen`, `audit_helper`, `dbt_meta_testing`, and
+`dbt_expectations` (which pulls in `dbt_date`). `dbt_expectations` is installed but not used by any
+test yet.
 
 ---
 
@@ -225,6 +232,7 @@ model YAML, and an `audit_helper` comparison of `dim_customers` v1 and v2.
 ├── snapshots/                          # YAML-defined orders_snapshot
 ├── seeds/                              # employees.csv
 ├── analysis/                           # codegen / audit_helper scratch queries
+├── docs/images/                        # README images
 ├── data/                               # raw source CSVs to load into the `raw` catalog
 ├── ci/profiles.yml                     # CI-only dbt profile (env-var driven, no secrets)
 ├── .github/workflows/                  # slim CI + manifest publishing
@@ -241,7 +249,7 @@ model YAML, and an `audit_helper` comparison of `dim_customers` v1 and v2.
 
 - A **Databricks** workspace with **Unity Catalog**, a **SQL warehouse**, and serverless compute
   (used by the Python model).
-- **dbt Fusion**:
+- **dbt Fusion** (the project is built and tested with Fusion 2.x, the same engine CI uses):
   ```bash
   curl -fsSL https://public.cdn.getdbt.com/fs/install/install.sh | sh
   ```
@@ -249,7 +257,7 @@ model YAML, and an `audit_helper` comparison of `dim_customers` v1 and v2.
 
 ### 1. Create catalogs and load the raw data
 
-Unity Catalog creates missing schemas on its own, but **not missing catalogs**. Run this once:
+dbt creates missing schemas during a build, but **not missing catalogs**. Run this once:
 
 ```sql
 create catalog if not exists raw;
@@ -296,10 +304,11 @@ dbt-fundamentals:
       threads: 8
 ```
 
-**Why the token is needed with OAuth:** the SQL warehouse connection works with OAuth alone. The
-Python model (`is_holiday.py`), however, submits a job through the Databricks REST API, and that
-requires a personal access token in the environment. Put it in a gitignored `.env` file at the
-project root and export it:
+**Why there's a token as well as OAuth:** the Python model (`is_holiday.py`) submits a job through
+the Databricks REST API, which needs a personal access token in the environment. When `token` is
+set, dbt also uses it for the warehouse connection, so an expired token breaks every command (see
+[Troubleshooting](#troubleshooting)). Put it in a gitignored `.env` file at the project root and
+export it:
 
 ```bash
 echo 'DBT_DATABRICKS_TOKEN=dapi...' >> .env
@@ -309,11 +318,16 @@ set -a && source .env && set +a
 ### 3. Build
 
 ```bash
+dbt debug                # check the connection first
 dbt deps                 # install packages
 dbt build                # seeds, models, snapshots, UDFs, tests, unit tests
-dbt source freshness     # optional
-dbt docs generate        # optional: browse lineage and column docs
+dbt docs generate        # optional: build the docs site
+dbt docs serve           # optional: browse lineage and column docs locally
 ```
+
+`dbt source freshness` will report errors on this dataset. The sample data stops in April 2018, so
+it's always past the freshness thresholds. That's expected, and it's why the freshness step in CI
+doesn't block anything.
 
 ### 4. Optional: enable CI on your fork
 
@@ -333,6 +347,15 @@ it. To fix it:
 1. Look for stale processes with `ps aux | grep "dbt lsp"` and `kill` any old ones.
 2. Reload the editor window (Cursor: **Developer: Reload Window**) so the extension starts
    `dbt lsp` again with the current environment.
+
+**`Invalid access token` / `AuthenticationFailed (dbt1011)` / HTTP 403:** the token in
+`DBT_DATABRICKS_TOKEN` has expired or been revoked. Create a new one in Databricks (**Settings →
+Developer → Access tokens**), update `.env`, re-export it, and confirm with `dbt debug`.
+
+**`dbt` runs dbt Core instead of Fusion:** if a Python virtualenv with `dbt-core` installed comes
+earlier on your `PATH`, its `dbt` hides the Fusion binary. Check with `type -a dbt` and
+`dbt --version` (Fusion reports 2.x). Don't install `dbt-core` into this project's `.venv`; it isn't
+needed. After uninstalling it, run `hash -r` or open a new terminal.
 
 **`catalog not found` on the first build:** create your dev catalog (see step 1).
 
